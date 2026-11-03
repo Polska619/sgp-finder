@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
 
-  const VERSION = 3;
+  const VERSION = 4;
   const BASE = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba";
   const CACHE_PREFIX = "sgp:box:v1:";
 
@@ -19,7 +19,7 @@
 
   const DEFAULTS = {
     minUsage: 24, bottomN: 10, minHitRate: 0.93, minGames: 5, minMpg: 20,
-    lineStyle: "ladder", scoring: "DraftKings",
+    lineStyle: "ladder", scoring: "DraftKings", oddsFormat: "american",
   };
 
   // ------------------------------------------------------------------ dates
@@ -259,71 +259,139 @@
     return den > 0 ? (100 * num_) / den : 0;
   }
 
-  const americanOdds = (p) => (p <= 0 || p >= 1 ? "–" : p >= 0.5 ? String(-Math.round((100 * p) / (1 - p))) : "+" + Math.round((100 * (1 - p)) / p));
-  const impliedProb = (o) => (o > 0 ? 100 / (o + 100) : -o / (-o + 100));
-  const payoutPer1 = (o) => (o > 0 ? o / 100 : 100 / -o);
+  // ------------------------------------------------------------------ stat types
+  const range = (a, b, step) => { const out = []; for (let x = a; x <= b; x += step) out.push(x); return out; };
+  const STATS = {
+    PTS: { label: "Points", get: (g) => g.pts, ladder: LADDERS.PTS },
+    REB: { label: "Rebounds", get: (g) => g.reb, ladder: LADDERS.REB },
+    AST: { label: "Assists", get: (g) => g.ast, ladder: LADDERS.AST },
+    "3PM": { label: "3-pointers", get: (g) => g.fg3m, ladder: [1, 2, 3, 4, 5, 6, 7] },
+    STL: { label: "Steals", get: (g) => g.stl, ladder: [1, 2, 3, 4] },
+    BLK: { label: "Blocks", get: (g) => g.blk, ladder: [1, 2, 3, 4] },
+    PRA: { label: "Pts+Reb+Ast", get: (g) => g.pts + g.reb + g.ast, ladder: range(10, 70, 5) },
+    PR: { label: "Pts+Reb", get: (g) => g.pts + g.reb, ladder: range(10, 60, 5) },
+    PA: { label: "Pts+Ast", get: (g) => g.pts + g.ast, ladder: range(10, 60, 5) },
+    RA: { label: "Reb+Ast", get: (g) => g.reb + g.ast, ladder: range(4, 24, 2) },
+  };
 
+  // ------------------------------------------------------------------ odds (American or decimal)
+  // "-900", "+150", "150" -> American; "1.14", "2.5" -> decimal. Returns decimal odds or null.
+  function parseOdds(input) {
+    const x = parseFloat(String(input == null ? "" : input).replace(/\s|\+/g, ""));
+    if (!isFinite(x)) return null;
+    if (Math.abs(x) >= 100) return x > 0 ? 1 + x / 100 : 1 + 100 / -x;
+    if (x > 1 && x < 100) return x;
+    return null;
+  }
+  function formatOdds(dec, fmt) {
+    if (!isFinite(dec) || dec <= 1) return "–";
+    if (fmt === "decimal") return dec.toFixed(2);
+    return dec >= 2 ? "+" + Math.round((dec - 1) * 100) : String(-Math.round(100 / (dec - 1)));
+  }
+  const probToDecimal = (p) => (p > 0 ? 1 / p : Infinity);
+  // kept for older callers
+  const americanOdds = (p) => formatOdds(probToDecimal(p), "american");
+  const impliedProb = (o) => { const d = parseOdds(o); return d ? 1 / d : NaN; };
+
+  // ------------------------------------------------------------------ parlay math
+  // Legs on the same player are scored together from that player's actual games (captures
+  // correlation). Different players are treated as independent and multiplied.
+  function parlayEstimate(legs, players) {
+    const groups = {};
+    for (const l of legs) (groups[l.pid] || (groups[l.pid] = [])).push(l);
+    let est = 1, raw = 1;
+    const parts = [];
+    for (const [pid, ls] of Object.entries(groups)) {
+      const games = (players[pid] && players[pid].games) || [];
+      const n = games.length;
+      const k = games.filter((g) => ls.every((l) => STATS[l.stat].get(g) >= l.line)).length;
+      const p = (k + 1) / (n + 2);
+      est *= p; raw *= n ? k / n : 0;
+      parts.push({ pid, name: ls[0].name, legs: ls.length, k, n, p });
+    }
+    const gamesUsed = new Set(legs.map((l) => l.gameId));
+    const sameGameOthers = [...gamesUsed].some((gid) => new Set(legs.filter((l) => l.gameId === gid).map((l) => l.pid)).size > 1);
+    return { est: legs.length ? est : 0, raw, parts, games: gamesUsed.size, sameGameOthers };
+  }
+
+  // ------------------------------------------------------------------ main
   function findSGPs(data, settings) {
     const s = Object.assign({}, DEFAULTS, settings);
     const boxes = data.boxes.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
     const dvp = defenseVsPosition(boxes, s.scoring);
     const rankOf = {}; dvp.forEach((d) => (rankOf[d.opp + "|" + d.pos] = d));
 
-    const oppOf = {}; const abbrOf = {};
+    const oppOf = {}, abbrOf = {}, gameOf = {};
     for (const ev of data.slate) {
       const [a, b] = ev.teams;
       oppOf[a.id] = b.id; oppOf[b.id] = a.id; abbrOf[a.id] = a.abbr; abbrOf[b.id] = b.abbr;
+      gameOf[a.id] = gameOf[b.id] = { id: ev.id, label: `${b.abbr} @ ${a.abbr}`, date: ev.date };
     }
+    const games = data.slate.map((ev) => ({ id: ev.id, label: `${ev.teams[1].abbr} @ ${ev.teams[0].abbr}`, date: ev.date }));
 
-    const players = {};
-    for (const b of boxes) for (const r of b.rows) (players[r.pid] || (players[r.pid] = [])).push(r);
+    const byPlayer = {};
+    for (const b of boxes) for (const r of b.rows) (byPlayer[r.pid] || (byPlayer[r.pid] = [])).push(r);
 
-    const picks = [], misses = [];
-    for (const games of Object.values(players)) {
-      const last = games[games.length - 1];
+    const players = {}, picks = [], misses = [], legs = [];
+    for (const pg of Object.values(byPlayer)) {
+      const last = pg[pg.length - 1];
       const team = last.team;
       if (!(team in oppOf)) continue;
-      const n = games.length;
-      const mpg = games.reduce((t, g) => t + g.min, 0) / n;
+      const n = pg.length;
+      const mpg = pg.reduce((t, g) => t + g.min, 0) / n;
       if (n < s.minGames || mpg < s.minMpg) continue;
-      const usg = usageRate(games);
-      if (usg < s.minUsage) continue;
-
-      const posCount = {}; games.forEach((g) => (posCount[g.pos] = (posCount[g.pos] || 0) + 1));
+      const usg = usageRate(pg);
+      const posCount = {}; pg.forEach((g) => (posCount[g.pos] = (posCount[g.pos] || 0) + 1));
       const pos = Object.keys(posCount).sort((x, y) => posCount[y] - posCount[x])[0];
       const opp = oppOf[team];
       const d = rankOf[opp + "|" + pos];
-      const reasons = [];
-      if (!d || d.rank > s.bottomN) reasons.push(`${abbrOf[opp]} ranks #${d ? d.rank : "?"} vs ${pos}`);
+      const info = {
+        pid: last.pid, name: last.name, team: abbrOf[team] || last.teamAbbr, opp: abbrOf[opp], pos, usg, gp: n, mpg,
+        oppRank: d ? d.rank : null, oppFp: d ? d.fp : null, gameId: gameOf[team].id, game: gameOf[team].label, games: pg,
+        passUsage: usg >= s.minUsage, passMatchup: !!d && d.rank <= s.bottomN,
+      };
+      players[info.pid] = info;
 
-      const legs = {};
-      for (const [stat, key] of [["PTS", "pts"], ["REB", "reb"], ["AST", "ast"]]) {
-        const ladder = s.lineStyle === "ladder" ? LADDERS[stat] : null;
-        legs[stat] = bestAltLine(games.map((g) => g[key]), s.minHitRate, ladder, LADDERS[stat][0]);
-        if (!legs[stat]) reasons.push(`no ${stat} line at ${Math.round(s.minHitRate * 100)}%`);
+      // best line for every stat type
+      const best = {};
+      for (const [stat, def] of Object.entries(STATS)) {
+        const ladder = s.lineStyle === "ladder" ? def.ladder : null;
+        const b = bestAltLine(pg.map(def.get), s.minHitRate, ladder, def.ladder[0]);
+        best[stat] = b;
+        if (b) legs.push({
+          key: `${info.pid}|${stat}|${b.line}`, pid: info.pid, name: info.name, team: info.team, opp: info.opp, pos,
+          gameId: info.gameId, game: info.game, stat, line: b.line, hits: b.hits, n: b.n, rate: b.rate,
+          usg, oppRank: info.oppRank, passUsage: info.passUsage, passMatchup: info.passMatchup,
+        });
       }
 
-      const row = {
-        pid: last.pid, name: last.name, team: abbrOf[team] || last.teamAbbr, opp: abbrOf[opp], pos,
-        usg, gp: n, mpg, oppRank: d ? d.rank : null, oppFp: d ? d.fp : null, legs, reasons,
-      };
-      if (legs.PTS && legs.REB && legs.AST) {
-        row.multiplied = legs.PTS.rate * legs.REB.rate * legs.AST.rate;
-        row.all3 = games.filter((g) => g.pts >= legs.PTS.line && g.reb >= legs.REB.line && g.ast >= legs.AST.line).length;
+      // auto PTS+REB+AST SGP (rules 1-4)
+      if (!info.passUsage) continue;
+      const reasons = [];
+      if (!info.passMatchup) reasons.push(`${info.opp} ranks #${d ? d.rank : "?"} vs ${pos}`);
+      const trio = { PTS: best.PTS, REB: best.REB, AST: best.AST };
+      for (const st of ["PTS", "REB", "AST"]) if (!trio[st]) reasons.push(`no ${st} line at ${Math.round(s.minHitRate * 100)}%`);
+      const row = Object.assign({}, info, { legs: trio, reasons });
+      delete row.games;
+      if (trio.PTS && trio.REB && trio.AST) {
+        row.multiplied = trio.PTS.rate * trio.REB.rate * trio.AST.rate;
+        row.all3 = pg.filter((g) => g.pts >= trio.PTS.line && g.reb >= trio.REB.line && g.ast >= trio.AST.line).length;
         row.est = (row.all3 + 1) / (n + 2);
-        row.fair = americanOdds(row.est);
+        row.legKeys = ["PTS", "REB", "AST"].map((st) => `${info.pid}|${st}|${trio[st].line}`);
       }
       (reasons.length ? misses : picks).push(row);
     }
     picks.sort((a, b) => b.est - a.est || b.gp - a.gp || b.usg - a.usg);
     misses.sort((a, b) => a.reasons.length - b.reasons.length || b.usg - a.usg);
+    legs.sort((a, b) => b.rate - a.rate || b.n - a.n || b.usg - a.usg);
 
-    const gpList = Object.values(players).map((g) => g.length).sort((a, b) => a - b);
+    const gpList = Object.values(byPlayer).map((g) => g.length).sort((a, b) => a - b);
     const typicalGp = gpList.length ? gpList[Math.floor(gpList.length / 2)] : 0;
-    return { picks, misses, dvp, typicalGp, slateGames: data.slate.length, gamesLoaded: boxes.length };
+    return { picks, misses, legs, players, games, dvp, typicalGp, slateGames: data.slate.length, gamesLoaded: boxes.length };
   }
 
-  const api = { VERSION, LADDERS, SCORING, DEFAULTS, loadAll, findSGPs, parseSummary, eventsFrom, bestAltLine,
-    usageRate, defenseVsPosition, americanOdds, impliedProb, payoutPer1, clearCache, ymd, seasonStart };
+  const api = { VERSION, LADDERS, STATS, SCORING, DEFAULTS, loadAll, findSGPs, parlayEstimate, parseSummary, eventsFrom,
+    bestAltLine, usageRate, defenseVsPosition, parseOdds, formatOdds, probToDecimal, americanOdds, impliedProb,
+    clearCache, ymd, seasonStart };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.SGP = api;
 })(typeof window !== "undefined" ? window : globalThis);
