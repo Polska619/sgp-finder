@@ -79,26 +79,39 @@
     }).filter((e) => e.teams.length === 2);
   }
 
-  async function fetchScoreboard(from, to) {
-    const url = `${BASE}/scoreboard?dates=${ymd(from)}${to ? "-" + ymd(to) : ""}&limit=1000`;
-    return eventsFrom(await getJSON(url));
+  // One day's games. ESPN only accepts a single date here (ranges return HTTP 400).
+  async function fetchScoreboard(day) {
+    return eventsFrom(await getJSON(`${BASE}/scoreboard?dates=${ymd(day)}`));
+  }
+
+  // Past days never change once every game is final, so those are cached.
+  async function fetchDay(day) {
+    const key = "day:" + ymd(day);
+    const cached = cacheGet(key);
+    if (cached) return cached;
+    const events = await fetchScoreboard(day);
+    const twoDaysAgo = new Date(); twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    if (day < twoDaysAgo && events.every((e) => e.completed)) cacheSet(key, events);
+    return events;
   }
 
   // All completed regular-season games from season start up to (not including) the slate date
   async function fetchSeasonEvents(slateDate, onProgress) {
     const start = seasonStart(slateDate);
     const end = new Date(slateDate); end.setDate(end.getDate() - 1);
-    if (end < start) return [];
-    let events = [];
-    // monthly chunks keep each response small
-    let a = new Date(start);
-    while (a <= end) {
-      const b = new Date(a.getFullYear(), a.getMonth() + 1, 0);
-      const to = b < end ? b : end;
-      onProgress && onProgress({ stage: "schedule", text: "Loading schedule…" });
-      events = events.concat(await fetchScoreboard(a, to));
-      a = new Date(to); a.setDate(a.getDate() + 1);
+    const days = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) days.push(new Date(d));
+    const events = []; let i = 0, done = 0;
+    async function worker() {
+      while (i < days.length) {
+        const day = days[i++];
+        const dayEvents = await fetchDay(day);
+        events.push(...dayEvents);
+        done++;
+        onProgress && onProgress({ stage: "schedule", text: `Loading schedule ${done} of ${days.length} days…` });
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(6, days.length) }, worker));
     const seen = new Set();
     return events.filter((e) => e.completed && e.seasonType === 2 && !seen.has(e.id) && seen.add(e.id));
   }
