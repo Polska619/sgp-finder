@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SGP Finder</title>
+<meta name="theme-color" content="#14213d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SGP Finder">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow column of bet-slip cards under a sticky control bar */
+:root {
+  --bg: #f3f4f7; --surface: #ffffff; --ink: #17203a; --muted: #5d6680; --line: #dde1ea;
+  --accent: #e2611b; --accent-ink: #ffffff; --band: #14213d; --band-ink: #f3f4f7;
+  --good: #1f8a4c; --good-bg: #e3f4ea; --bad: #b4232c; --bad-bg: #fbe6e7; --warn-bg: #fff4dc; --warn-ink: #7a5300;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1424; --surface: #172036; --ink: #e8ebf3; --muted: #9aa3ba; --line: #283350;
+  --accent: #f07a36; --accent-ink: #14100c; --band: #0a0f1c; --band-ink: #e8ebf3;
+  --good: #5fd08e; --good-bg: #173a29; --bad: #ff8a90; --bad-bg: #3d1d22; --warn-bg: #3a2f14; --warn-ink: #f2cf7d;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e1424; --surface: #172036; --ink: #e8ebf3; --muted: #9aa3ba; --line: #283350;
+  --accent: #f07a36; --accent-ink: #14100c; --band: #0a0f1c; --band-ink: #e8ebf3;
+  --good: #5fd08e; --good-bg: #173a29; --bad: #ff8a90; --bad-bg: #3d1d22; --warn-bg: #3a2f14; --warn-ink: #f2cf7d;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--body); -webkit-text-size-adjust: 100%; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); background: var(--band); z-index: 10; }
+.wrap { max-width: 720px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+header { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--band); color: var(--band-ink); }
+header .wrap { padding-block: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+h1 { font: 700 26px/1 var(--display); letter-spacing: .02em; margin: 0; flex: 1 1 auto; text-transform: uppercase; }
+h1 span { color: var(--accent); }
+.controls { display: flex; gap: 8px; align-items: center; }
+input, select, button { font: inherit; color: inherit; }
+input[type=date], input[type=number], select {
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 40px; }
+header input[type=date] { border-color: transparent; }
+button { cursor: pointer; border: 0; border-radius: 8px; padding: 9px 16px; min-height: 40px; font-weight: 600; }
+.primary { background: var(--accent); color: var(--accent-ink); }
+.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+button:disabled { opacity: .55; cursor: wait; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+main .wrap { padding-block: 16px 40px; display: grid; gap: 16px; }
+details.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+details.panel > summary { cursor: pointer; padding: 12px 14px; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 8px; }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary::after { content: "+"; color: var(--muted); font-weight: 400; }
+details.panel[open] > summary::after { content: "–"; }
+.panel-body { padding: 0 14px 14px; }
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.settings label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.settings label b { color: var(--ink); font-weight: 600; }
+.settings input, .settings select { width: 100%; }
+.settings .row { display: flex; justify-content: space-between; gap: 8px; grid-column: 1 / -1; flex-wrap: wrap; }
+
+.status { display: grid; gap: 8px; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.note { padding: 10px 12px; border-radius: 10px; font-size: 14px; }
+.note.warn { background: var(--warn-bg); color: var(--warn-ink); }
+.note.err { background: var(--bad-bg); color: var(--bad); }
+.muted { color: var(--muted); }
+
+.summary { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--muted); }
+.summary b { color: var(--ink); font-variant-numeric: tabular-nums; }
+h2 { font: 700 20px/1.1 var(--display); text-transform: uppercase; letter-spacing: .04em; margin: 4px 0 0; }
+
+.slip { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.slip-top { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px 10px; align-items: flex-start; }
+.who { min-width: 0; }
+.who .name { font: 700 22px/1.1 var(--display); letter-spacing: .01em; overflow-wrap: anywhere; }
+.who .meta { font-size: 13px; color: var(--muted); }
+.prob { text-align: right; flex: none; }
+.prob .pct { font: 700 30px/1 var(--display); color: var(--accent); font-variant-numeric: tabular-nums; }
+.prob .fair { font-size: 12px; color: var(--muted); }
+.legs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+.leg { padding: 8px 10px; text-align: center; }
+.leg + .leg { border-left: 1px dashed var(--line); }
+.leg .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.leg .v { font: 700 24px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.leg .r { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 14px; font-size: 13px; color: var(--muted); }
+.facts b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.price { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 14px 12px; background: color-mix(in srgb, var(--bg) 60%, var(--surface)); }
+.price label { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.price input { width: 96px; min-height: 36px; padding: 6px 8px; }
+.verdict { font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.verdict.pos { background: var(--good-bg); color: var(--good); }
+.verdict.neg { background: var(--bad-bg); color: var(--bad); }
+
+.list { display: grid; gap: 1px; background: var(--line); border-radius: 8px; overflow: hidden; }
+.list > div { background: var(--surface); padding: 8px 10px; display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+.list .why { color: var(--bad); font-size: 13px; text-align: right; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+.seg button { border-radius: 0; background: transparent; color: var(--muted); min-height: 34px; padding: 6px 16px; }
+.seg button[aria-pressed=true] { background: var(--ink); color: var(--bg); }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+tr.soft td { color: var(--accent); font-weight: 600; }
+footer { font-size: 12px; color: var(--muted); }
+@media (max-width: 420px) { .who .name { font-size: 20px; } .prob .pct { font-size: 26px; } }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>SGP <span>Finder</span></h1>
+    <div class="controls">
+      <input type="date" id="date" aria-label="Game date">
+      <button class="primary" id="go">Find SGPs</button>
+    </div>
+  </div>
+</header>
+
+<main><div class="wrap">
+  <details class="panel" id="settingsPanel">
+    <summary>Rules &amp; settings <span class="muted" id="rulesLine" style="font-size:13px; font-weight:400; text-align:right; margin-left:auto"></span></summary>
+    <div class="panel-body settings">
+      <label for="minUsage"><b>1) Min usage rate %</b><input type="number" id="minUsage" step="0.5" min="0" max="50"></label>
+      <label for="bottomN"><b>2) Opponent in worst N vs position</b><input type="number" id="bottomN" min="1" max="30"></label>
+      <label for="minHitRate"><b>3) Min hit rate per leg %</b><input type="number" id="minHitRate" min="50" max="100"></label>
+      <label for="lineStyle"><b>Alt lines</b>
+        <select id="lineStyle"><option value="ladder">Sportsbook ladder (10+, 15+, 20+…)</option><option value="any">Any whole number</option></select></label>
+      <label for="scoring"><b>Fantasy scoring (rule 2)</b>
+        <select id="scoring"><option>DraftKings</option><option>FanDuel</option></select></label>
+      <label for="minGames"><b>Min games played</b><input type="number" id="minGames" min="1" max="82"></label>
+      <label for="minMpg"><b>Min minutes per game</b><input type="number" id="minMpg" min="0" max="48"></label>
+      <div class="row">
+        <button class="ghost" id="reset">Restore defaults</button>
+        <button class="ghost" id="clear">Re-download all games</button>
+      </div>
+    </div>
+  </details>
+
+  <section class="status" id="status" hidden>
+    <div class="muted" id="statusText">Loading…</div>
+    <div class="bar"><i id="barFill"></i></div>
+  </section>
+  <div id="error" class="note err" hidden></div>
+
+  <section id="results" hidden>
+    <div style="display:grid; gap:12px">
+      <div class="summary" id="summary"></div>
+      <div class="note warn" id="earlyWarn" hidden></div>
+      <h2 id="picksTitle">SGPs</h2>
+      <div id="picks" style="display:grid; gap:12px"></div>
+      <details class="panel" id="missPanel">
+        <summary id="missTitle">Near misses</summary>
+        <div class="panel-body"><p class="muted" style="margin:0 0 8px; font-size:13px">High-usage players on tonight's slate who failed rule 2 or 3.</p><div class="list" id="misses"></div></div>
+      </details>
+      <details class="panel">
+        <summary>Defense vs position</summary>
+        <div class="panel-body">
+          <p class="muted" style="margin:0 0 8px; font-size:13px">Fantasy points allowed per game. #1 allows the most. Highlighted teams count as a soft matchup.</p>
+          <div class="seg" role="group" aria-label="Position">
+            <button data-pos="G" aria-pressed="true">Guards</button><button data-pos="F" aria-pressed="false">Forwards</button><button data-pos="C" aria-pressed="false">Centers</button>
+          </div>
+          <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Team</th><th>FP allowed</th><th>Games</th></tr></thead><tbody id="dvp"></tbody></table></div>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <section id="intro">
+    <p>Finds points + rebounds + assists same-game parlays for the selected date:</p>
+    <ol class="muted" style="padding-left:20px; margin:0">
+      <li>Usage rate of 24% or more</li>
+      <li>Opponent is a bottom-10 defense against the player's position (fantasy points allowed)</li>
+      <li>Highest alt line in each stat hit in 93%+ of this season's games</li>
+      <li>Combined probability of all three hitting</li>
+    </ol>
+    <p class="muted" style="font-size:13px">The first load downloads every box score this season and can take a minute. After that only new games are fetched.</p>
+  </section>
+
+  <footer>Stats from ESPN. Not aware of injuries, rest days or minutes limits. Check the injury report before betting. <span id="ver"></span></footer>
+</div></main>
+
+<script src="sgp.js?v=3"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pct = (x, d = 1) => (x * 100).toFixed(d) + "%";
+  const FIELDS = ["minUsage", "bottomN", "minHitRate", "lineStyle", "scoring", "minGames", "minMpg"];
+  let lastData = null, lastResult = null, dvpPos = "G";
+
+  // ---- settings
+  function readSettings() {
+    return {
+      minUsage: +$("minUsage").value, bottomN: +$("bottomN").value, minHitRate: +$("minHitRate").value / 100,
+      lineStyle: $("lineStyle").value, scoring: $("scoring").value, minGames: +$("minGames").value, minMpg: +$("minMpg").value,
+    };
+  }
+  function writeSettings(s) {
+    $("minUsage").value = s.minUsage; $("bottomN").value = s.bottomN; $("minHitRate").value = Math.round(s.minHitRate * 100);
+    $("lineStyle").value = s.lineStyle; $("scoring").value = s.scoring; $("minGames").value = s.minGames; $("minMpg").value = s.minMpg;
+    rulesLine();
+  }
+  function rulesLine() {
+    const s = readSettings();
+    $("rulesLine").textContent = `USG ${s.minUsage}%+ · worst ${s.bottomN} · ${Math.round(s.minHitRate * 100)}% legs`;
+  }
+  function saveSettings() { try { localStorage.setItem("sgp:settings", JSON.stringify(readSettings())); } catch (e) {} }
+  let saved = null; try { saved = JSON.parse(localStorage.getItem("sgp:settings")); } catch (e) {}
+  writeSettings(Object.assign({}, SGP.DEFAULTS, saved || {}));
+
+  $("ver").textContent = "· App version " + (SGP.VERSION || 1);
+  const today = new Date();
+  $("date").value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+  FIELDS.forEach((f) => $(f).addEventListener("change", () => { saveSettings(); rulesLine(); if (lastData) render(); }));
+  $("reset").addEventListener("click", () => { writeSettings(SGP.DEFAULTS); saveSettings(); if (lastData) render(); });
+  $("clear").addEventListener("click", () => { SGP.clearCache(); lastData = null; run(); });
+  $("go").addEventListener("click", run);
+
+  // ---- load
+  async function run() {
+    const [y, m, d] = $("date").value.split("-").map(Number);
+    if (!y) return;
+    const slateDate = new Date(y, m - 1, d);
+    $("go").disabled = true; $("error").hidden = true; $("status").hidden = false; $("intro").hidden = true;
+    setProgress("Loading schedule…", 0.03);
+    try {
+      lastData = await SGP.loadAll(slateDate, (p) => {
+        if (p.stage === "boxes") setProgress(`Loading box scores ${p.done} of ${p.total}…`, p.total ? 0.05 + 0.95 * p.done / p.total : 1);
+        else setProgress(p.text, 0.03);
+      });
+      $("status").hidden = true;
+      render();
+    } catch (e) {
+      $("status").hidden = true;
+      $("error").hidden = false;
+      $("error").textContent = "Couldn't load stats from ESPN (app version " + (SGP.VERSION || 1) + "). Check your connection and press Find SGPs again. (" + e.message + ")";
+    } finally { $("go").disabled = false; }
+  }
+  function setProgress(text, frac) { $("statusText").textContent = text; $("barFill").style.width = Math.round(frac * 100) + "%"; }
+
+  // ---- render
+  function render() {
+    const s = readSettings();
+    const r = lastResult = SGP.findSGPs(lastData, s);
+    $("results").hidden = false;
+    $("summary").innerHTML = `<span>Games on slate <b>${r.slateGames}</b></span><span>SGPs found <b>${r.picks.length}</b></span>` +
+      `<span>Season games loaded <b>${r.gamesLoaded}</b></span><span>Typical games played <b>${r.typicalGp}</b></span>`;
+    const warn = $("earlyWarn");
+    warn.hidden = !(r.typicalGp && r.typicalGp < 15);
+    warn.textContent = `Early season: most players have only about ${r.typicalGp} games. A ${Math.round(s.minHitRate * 100)}% hit rate means a near-perfect record at this sample size, so lean on the estimated probability (adjusted for small samples), not the raw records.`;
+
+    const picks = $("picks");
+    if (!r.slateGames) picks.innerHTML = `<p class="muted">No games on this date.</p>`;
+    else if (!r.picks.length) picks.innerHTML = `<p class="muted">Nobody passes all four rules for this slate. Check the near misses, or loosen a rule in settings.</p>`;
+    else picks.innerHTML = r.picks.map(slip).join("");
+    picks.querySelectorAll("input[data-i]").forEach((inp) => {
+      inp.addEventListener("input", () => verdict(inp));
+    });
+
+    $("missTitle").textContent = `Near misses (${r.misses.length})`;
+    $("misses").innerHTML = r.misses.length ? r.misses.map((m) =>
+      `<div><span><b>${esc(m.name)}</b> <span class="muted">${esc(m.team)} vs ${esc(m.opp)} · ${m.pos} · USG ${m.usg.toFixed(1)}%</span></span><span class="why">${esc(m.reasons.join("; "))}</span></div>`
+    ).join("") : `<div><span class="muted">None.</span></div>`;
+    renderDvp();
+  }
+
+  function slip(p, i) {
+    const leg = (k, label) => `<div class="leg"><div class="k">${label}</div><div class="v">${p.legs[k].line}+</div><div class="r">${p.legs[k].hits}/${p.legs[k].n}</div></div>`;
+    return `<article class="slip">
+      <div class="slip-top">
+        <div class="who"><div class="name">${esc(p.name)}</div>
+          <div class="meta">${esc(p.team)} vs ${esc(p.opp)} · ${p.pos}</div></div>
+        <div class="prob"><div class="pct">${pct(p.est)}</div><div class="fair">est. true prob · fair ${p.fair}</div></div>
+      </div>
+      <div class="legs">${leg("PTS", "Points")}${leg("REB", "Rebounds")}${leg("AST", "Assists")}</div>
+      <div class="facts">
+        <span>USG <b>${p.usg.toFixed(1)}%</b></span>
+        <span>${esc(p.opp)} <b>#${p.oppRank}</b> vs ${p.pos} (${p.oppFp.toFixed(1)} FP)</span>
+        <span>All 3 hit <b>${p.all3}/${p.gp}</b></span>
+        <span>Multiplied <b>${pct(p.multiplied)}</b></span>
+        <span>MPG <b>${p.mpg.toFixed(1)}</b></span>
+      </div>
+      <div class="price">
+        <label for="odds${i}">Book odds <input type="number" inputmode="numeric" id="odds${i}" data-i="${i}" placeholder="-150"></label>
+        <span class="muted" id="v${i}" style="font-size:13px">Enter the sportsbook's SGP price to see your edge.</span>
+      </div>
+    </article>`;
+  }
+
+  function verdict(inp) {
+    const i = +inp.dataset.i, p = lastResult.picks[i], o = parseFloat(inp.value), out = $("v" + i);
+    if (!isFinite(o) || (o > -100 && o < 100)) { out.className = "muted"; out.textContent = "Use American odds like -150 or +120."; return; }
+    const imp = SGP.impliedProb(o), ev = p.est * SGP.payoutPer1(o) - (1 - p.est);
+    out.className = "verdict " + (ev >= 0 ? "pos" : "neg");
+    out.textContent = `Book ${pct(imp)} · edge ${((p.est - imp) * 100).toFixed(1)} pts · EV ${ev >= 0 ? "+" : ""}${(ev * 100).toFixed(1)}%`;
+  }
+
+  function renderDvp() {
+    if (!lastResult) return;
+    const n = readSettings().bottomN;
+    const rows = lastResult.dvp.filter((d) => d.pos === dvpPos).sort((a, b) => a.rank - b.rank);
+    $("dvp").innerHTML = rows.map((d) => `<tr class="${d.rank <= n ? "soft" : ""}"><td>${d.rank}</td><td>${esc(d.abbr)}</td><td>${d.fp.toFixed(1)}</td><td>${d.games}</td></tr>`).join("");
+  }
+  document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+    dvpPos = b.dataset.pos;
+    document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    renderDvp();
+  }));
+})();
+</script>
+</body>
+</html>
